@@ -9,8 +9,19 @@ El agente escucha únicamente en `127.0.0.1`; no expone impresoras a la red. Ace
 1. Instalar Node.js 20 o superior.
 2. Abrir una consola en esta carpeta y ejecutar `npm install`.
 3. Copiar `agent.config.example.json` como `agent.config.json`.
-4. Configurar un token aleatorio de al menos 24 caracteres y el dominio real de la aplicación DNX en `allowedOrigins`.
+4. El paquete de producción ya incluye el origen `http://192.168.1.38:8080` y su token. Mantener ambos valores sincronizados con el frontend.
 5. Ejecutar `run-agent.cmd` o `npm start`.
+
+El agente permanece en `127.0.0.1:5174`: debe instalarse en cada PC que use Chrome y tenga una impresora. Si Chrome se usa mediante sesión remota directamente en el servidor, se instala en el servidor.
+
+## Inicio automático
+
+Usar el **Programador de tareas**, no un servicio Windows, para conservar acceso a las impresoras del usuario:
+
+1. Crear tarea **DNX Print Agent** para el usuario que tiene la impresora predeterminada.
+2. Activador: **Al iniciar sesión**.
+3. Acción: programa `C:\Windows\System32\cmd.exe`; argumentos `/c "C:\DNX\print-agent\run-agent-service.cmd"`.
+4. Elegir **Ejecutar solo cuando el usuario haya iniciado sesión** y, en Configuración, reiniciar ante error.
 
 Para iniciarlo al ingresar a Windows, crear una tarea en el Programador de tareas que ejecute `run-agent.cmd` con el usuario que usa la impresora.
 
