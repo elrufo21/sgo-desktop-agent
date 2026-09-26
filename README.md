@@ -14,16 +14,23 @@ El agente escucha únicamente en `127.0.0.1`; no expone impresoras a la red. Ace
 
 El agente permanece en `127.0.0.1:5174`: debe instalarse en cada PC que use Chrome y tenga una impresora. Si Chrome se usa mediante sesión remota directamente en el servidor, se instala en el servidor.
 
+En `agent.config.json`, `allowedOrigins` debe contener la dirección desde la cual se abre DNX. La configuración de este proyecto contempla producción (`http://192.168.1.38:8080`) y desarrollo local (`http://localhost:5173` y `http://localhost:8080`). Después de cambiarla, reiniciar la tarea **DNX Print Agent**.
+
+Para los tickets DNX, la impresora se configura en `MAQUINAS.Tiketera`: la web identifica el equipo y le entrega ese nombre al agente. El campo opcional `defaultPrinter` queda solo como compatibilidad para solicitudes que no indiquen impresora; no se usa para decidir la ticketera de DNX.
+
 ## Inicio automático
 
-Usar el **Programador de tareas**, no un servicio Windows, para conservar acceso a las impresoras del usuario:
+Usar el **Programador de tareas**, no un servicio Windows, para conservar acceso a las impresoras del usuario. Un servicio de Windows no puede usar de forma fiable la impresora predeterminada del usuario que inició sesión.
 
-1. Crear tarea **DNX Print Agent** para el usuario que tiene la impresora predeterminada.
-2. Activador: **Al iniciar sesión**.
-3. Acción: programa `C:\Windows\System32\cmd.exe`; argumentos `/c "C:\DNX\print-agent\run-agent-service.cmd"`.
-4. Elegir **Ejecutar solo cuando el usuario haya iniciado sesión** y, en Configuración, reiniciar ante error.
+Después de instalar dependencias y configurar `agent.config.json`, ejecutar una sola vez con PowerShell:
 
-Para iniciarlo al ingresar a Windows, crear una tarea en el Programador de tareas que ejecute `run-agent.cmd` con el usuario que usa la impresora.
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-auto-start.ps1
+```
+
+El instalador crea o actualiza la tarea **DNX Print Agent** para el usuario actual. La tarea inicia al ingresar a Windows, queda ejecutándose sin límite de tiempo y reintenta el agente cada minuto si se detiene. También lo inicia y valida inmediatamente en `http://127.0.0.1:5174/health`.
+
+Debe ejecutarse con el mismo usuario que usa Chrome y tiene la impresora predeterminada. No requiere convertir el agente en un servicio de red ni exponer el puerto fuera del equipo.
 
 ## API local
 

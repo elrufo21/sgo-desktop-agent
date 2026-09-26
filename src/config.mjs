@@ -23,6 +23,7 @@ export async function loadConfig() {
   }
 
   const token = String(config.token ?? "").trim();
+  const defaultPrinter = String(config.defaultPrinter ?? "").trim();
   const allowedOrigins = Array.isArray(config.allowedOrigins)
     ? config.allowedOrigins.map((origin) => String(origin).trim()).filter(Boolean)
     : [];
@@ -42,5 +43,5 @@ export async function loadConfig() {
     throw new Error("maxPdfBytes debe ser un entero positivo.");
   }
 
-  return { allowedOrigins, maxPdfBytes, port, token };
+  return { allowedOrigins, defaultPrinter, maxPdfBytes, port, token };
 }

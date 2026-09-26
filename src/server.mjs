@@ -1,13 +1,16 @@
 import { createServer } from "node:http";
+import { execFile } from "node:child_process";
 import os from "node:os";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import pdfToPrinter from "pdf-to-printer";
 import { loadConfig } from "./config.mjs";
 import { parsePdfBase64 } from "./pdf.mjs";
 
-const { getDefaultPrinter, getPrinters, print } = pdfToPrinter;
+const { print } = pdfToPrinter;
+const execFileAsync = promisify(execFile);
 
 const JSON_CONTENT_TYPE = "application/json; charset=utf-8";
 
@@ -43,14 +46,47 @@ const getAuthorizedOrigin = (request, config) => {
 const isAuthorized = (request, token) =>
   request.headers.authorization === `Bearer ${token}`;
 
-const printableOptions = (body) => {
+const getWindowsDefaultPrinter = async () => {
+  const command = [
+    "Add-Type -AssemblyName System.Drawing;",
+    "$settings = [System.Drawing.Printing.PrinterSettings]::new();",
+    "if ($settings.IsValid) { [Console]::Write($settings.PrinterName) }",
+  ].join(" ");
+  const { stdout } = await execFileAsync(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-Command", command],
+    { windowsHide: true },
+  );
+  return stdout.trim() || null;
+};
+
+const getWindowsPrinters = async () => {
+  const command = [
+    "Get-CimInstance Win32_Printer |",
+    "Select-Object @{Name='name';Expression={$_.Name}},",
+    "@{Name='isDefault';Expression={$_.Default}},",
+    "@{Name='isOffline';Expression={$_.WorkOffline}} |",
+    "ConvertTo-Json -Compress",
+  ].join(" ");
+  const { stdout } = await execFileAsync(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-Command", command],
+    { windowsHide: true },
+  );
+  const parsed = JSON.parse(stdout.trim() || "[]");
+  return Array.isArray(parsed) ? parsed : [parsed];
+};
+
+const printableOptions = (body, defaultPrinter) => {
   const copies = body.copies === undefined ? undefined : Number(body.copies);
   if (copies !== undefined && (!Number.isInteger(copies) || copies < 1 || copies > 99)) {
     throw new Error("copies debe ser un entero entre 1 y 99.");
   }
 
+  const printer = String(body.printer ?? defaultPrinter ?? "").trim();
+
   return {
-    ...(body.printer ? { printer: String(body.printer) } : {}),
+    ...(printer ? { printer } : {}),
     ...(copies ? { copies } : {}),
     ...(body.paperSize ? { paperSize: String(body.paperSize) } : {}),
     ...(body.orientation === "landscape" ? { orientation: "landscape" } : {}),
@@ -58,13 +94,13 @@ const printableOptions = (body) => {
   };
 };
 
-async function printPdf(body, maxPdfBytes) {
+async function printPdf(body, maxPdfBytes, defaultPrinter) {
   const pdf = parsePdfBase64(body.pdfBase64, maxPdfBytes);
   const directory = await mkdtemp(join(tmpdir(), "dnx-print-"));
   const filePath = join(directory, "documento.pdf");
   try {
     await writeFile(filePath, pdf);
-    await print(filePath, printableOptions(body));
+    await print(filePath, printableOptions(body, defaultPrinter));
   } finally {
     await rm(directory, { force: true, recursive: true });
   }
@@ -78,6 +114,8 @@ const start = async () => {
   const config = await loadConfig();
   const maxRequestBytes = Math.ceil(config.maxPdfBytes * 1.4) + 1024;
   let printQueue = Promise.resolve();
+  const resolveDefaultPrinter = async () =>
+    config.defaultPrinter || (await getWindowsDefaultPrinter().catch(() => null));
 
   const server = createServer(async (request, response) => {
     const origin = getAuthorizedOrigin(request, config);
@@ -105,11 +143,11 @@ const start = async () => {
     // El hostname no permite operar impresoras; se expone al origen permitido
     // para que la web resuelva la serie asignada de esta PC en su API.
     if (request.method === "GET" && url.pathname === "/v1/system") {
-      const defaultPrinter = await getDefaultPrinter().catch(() => null);
+      const defaultPrinter = await resolveDefaultPrinter();
       sendJson(response, 200, {
         hostname: os.hostname(),
         platform: process.platform,
-        defaultPrinter: defaultPrinter?.name ?? null,
+        defaultPrinter,
       }, origin);
       return;
     }
@@ -121,7 +159,7 @@ const start = async () => {
 
     try {
       if (request.method === "GET" && url.pathname === "/v1/printers") {
-        sendJson(response, 200, { printers: await getPrinters() }, origin);
+        sendJson(response, 200, { printers: await getWindowsPrinters() }, origin);
         return;
       }
 
@@ -130,7 +168,10 @@ const start = async () => {
         if (!body || typeof body !== "object" || Array.isArray(body)) {
           throw new Error("El cuerpo de impresión debe ser un objeto JSON.");
         }
-        printQueue = printQueue.catch(() => undefined).then(() => printPdf(body, config.maxPdfBytes));
+        printQueue = printQueue.catch(() => undefined).then(async () => {
+          const defaultPrinter = await resolveDefaultPrinter();
+          await printPdf(body, config.maxPdfBytes, defaultPrinter);
+        });
         await printQueue;
         sendJson(response, 202, { ok: true, message: "Impresión enviada." }, origin);
         return;
