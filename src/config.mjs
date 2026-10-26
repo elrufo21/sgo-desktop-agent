@@ -5,6 +5,21 @@ import { fileURLToPath } from "node:url";
 const sourceDirectory = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const configPath = resolve(sourceDirectory, "..", "agent.config.json");
 
+export function normalizePrintScale(value) {
+  const printScale = String(value ?? "").trim().toLowerCase();
+  if (printScale && !["noscale", "shrink", "fit"].includes(printScale)) {
+    throw new Error("printScale debe ser noscale, shrink o fit.");
+  }
+  return printScale;
+}
+
+export function normalizeDiagnosticMode(value) {
+  if (value !== undefined && typeof value !== "boolean") {
+    throw new Error("diagnosticMode debe ser true o false (sin comillas).");
+  }
+  return value ?? false;
+}
+
 export async function loadConfig() {
   let rawConfig;
   try {
@@ -24,6 +39,8 @@ export async function loadConfig() {
 
   const token = String(config.token ?? "").trim();
   const defaultPrinter = String(config.defaultPrinter ?? "").trim();
+  const printScale = normalizePrintScale(config.printScale);
+  const diagnosticMode = normalizeDiagnosticMode(config.diagnosticMode);
   const allowedOrigins = Array.isArray(config.allowedOrigins)
     ? config.allowedOrigins.map((origin) => String(origin).trim()).filter(Boolean)
     : [];
@@ -42,6 +59,5 @@ export async function loadConfig() {
   if (!Number.isInteger(maxPdfBytes) || maxPdfBytes < 1) {
     throw new Error("maxPdfBytes debe ser un entero positivo.");
   }
-
-  return { allowedOrigins, defaultPrinter, maxPdfBytes, port, token };
+  return { allowedOrigins, defaultPrinter, diagnosticMode, maxPdfBytes, port, printScale, token };
 }

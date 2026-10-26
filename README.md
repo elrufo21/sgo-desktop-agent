@@ -7,30 +7,47 @@ El agente escucha únicamente en `127.0.0.1`; no expone impresoras a la red. Ace
 ## Instalación
 
 1. Instalar Node.js 20 o superior.
-2. Abrir una consola en esta carpeta y ejecutar `npm install`.
+2. Abrir una consola en esta carpeta y ejecutar `npm ci`.
 3. Copiar `agent.config.example.json` como `agent.config.json`.
 4. El paquete de producción ya incluye el origen `http://192.168.1.38:8080` y su token. Mantener ambos valores sincronizados con el frontend.
-5. Ejecutar `run-agent.cmd` o `npm start`.
+5. Ejecutar `install-service.ps1` desde PowerShell como administrador para instalarlo como servicio de Windows.
 
 El agente permanece en `127.0.0.1:5174`: debe instalarse en cada PC que use Chrome y tenga una impresora. Si Chrome se usa mediante sesión remota directamente en el servidor, se instala en el servidor.
 
-En `agent.config.json`, `allowedOrigins` debe contener la dirección desde la cual se abre DNX. La configuración de este proyecto contempla producción (`http://192.168.1.38:8080`) y desarrollo local (`http://localhost:5173` y `http://localhost:8080`). Después de cambiarla, reiniciar la tarea **DNX Print Agent**.
+En `agent.config.json`, `allowedOrigins` debe contener la dirección desde la cual se abre DNX. La configuración de este proyecto contempla producción (`http://192.168.1.38:8080`) y desarrollo local (`http://localhost:5173` y `http://localhost:8080`). Después de cambiarla, reiniciar el servicio con `Restart-Service DNXPrintAgent`.
+
+`printScale` permite elegir cómo SumatraPDF acomoda el PDF en el papel: `noscale`, `shrink` o `fit`. Déjalo vacío para conservar el comportamiento predeterminado. Para diagnosticar tickets que salen reducidos desde la impresión silenciosa, configura `"printScale": "fit"` en esa PC y reinicia el agente; la opción `fit` se aplica solo a ese equipo si solo ahí se cambia la configuración.
 
 Para los tickets DNX, la impresora se configura en `MAQUINAS.Tiketera`: la web identifica el equipo y le entrega ese nombre al agente. El campo opcional `defaultPrinter` queda solo como compatibilidad para solicitudes que no indiquen impresora; no se usa para decidir la ticketera de DNX.
 
-## Inicio automático
+## Diagnóstico sin gastar papel
 
-Usar el **Programador de tareas**, no un servicio Windows, para conservar acceso a las impresoras del usuario. Un servicio de Windows no puede usar de forma fiable la impresora predeterminada del usuario que inició sesión.
+Con diagnosticMode activado, el agente guarda el PDF recibido y los registros en
+la carpeta diagnostics junto a su configuración, sin llamar a la impresora.
+El script configurar-diagnostico.ps1 actualiza el servicio instalado y activa ese
+modo conservando los demás valores. La guía de activación y desactivación está en
+[docs/diagnostico-sin-imprimir.md](docs/diagnostico-sin-imprimir.md).
+En este modo, POST /v1/print responde HTTP 409 con el mensaje de bloqueo y la ruta
+del PDF; es deliberado para que la web actual no anuncie una impresión que no ocurrió.
+GET /health informa el build y si el diagnóstico está activo.
 
-Después de instalar dependencias y configurar `agent.config.json`, ejecutar una sola vez con PowerShell:
+## Servicio de Windows
+
+El servicio inicia con Windows y WinSW lo reinicia si el proceso termina. La instalación descarga WinSW 2.12.0 desde su publicación oficial y verifica el SHA-256 antes de registrarlo. Requiere Node.js 20 o superior instalado para todo el equipo, `npm ci`, un `agent.config.json` válido y permisos de administrador.
+
+Desde una consola de PowerShell como administrador, ejecutar:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\install-auto-start.ps1
+powershell -ExecutionPolicy Bypass -File .\install-service.ps1
 ```
 
-El instalador crea o actualiza la tarea **DNX Print Agent** para el usuario actual. La tarea inicia al ingresar a Windows, queda ejecutándose sin límite de tiempo y reintenta el agente cada minuto si se detiene. También lo inicia y valida inmediatamente en `http://127.0.0.1:5174/health`.
+El instalador comprueba `http://127.0.0.1:5174/health`. Si detecta la tarea antigua **DNX Print Agent**, la detiene durante la migración y la quita solo después de validar el servicio. También configura el inicio automático y la recuperación ante fallos.
 
-Debe ejecutarse con el mismo usuario que usa Chrome y tiene la impresora predeterminada. No requiere convertir el agente en un servicio de red ni exponer el puerto fuera del equipo.
+El servicio se instala como **LocalSystem** por defecto. Si la impresora solo está instalada para un usuario o es una impresora de red, configura la pestaña **Iniciar sesión** del servicio para usar una cuenta que tenga acceso a esa impresora y reinícialo. Prueba una impresión real después de instalarlo: los servicios no comparten necesariamente las impresoras predeterminadas de una sesión de escritorio.
+
+Los registros de WinSW quedan junto al agente. `run-agent.cmd` y `npm start` siguen disponibles para diagnóstico manual; no deben ejecutarse a la vez que el servicio porque ocuparían el puerto 5174.
+
+Para retirar el servicio y la tarea antigua sin borrar configuración ni registros, ejecutar `uninstall-agent.ps1` como administrador. La guía de instalación, verificación y desinstalación del servidor está en [`docs/servicio-windows-y-desinstalacion.md`](docs/servicio-windows-y-desinstalacion.md).
 
 ## API local
 

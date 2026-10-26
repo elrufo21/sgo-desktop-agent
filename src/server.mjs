@@ -1,13 +1,10 @@
 import { createServer } from "node:http";
 import { execFile } from "node:child_process";
 import os from "node:os";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { promisify } from "node:util";
 import pdfToPrinter from "pdf-to-printer";
 import { loadConfig } from "./config.mjs";
-import { parsePdfBase64 } from "./pdf.mjs";
+import { AGENT_BUILD, processPrintJob } from "./print-job.mjs";
 
 const { print } = pdfToPrinter;
 const execFileAsync = promisify(execFile);
@@ -77,35 +74,6 @@ const getWindowsPrinters = async () => {
   return Array.isArray(parsed) ? parsed : [parsed];
 };
 
-const printableOptions = (body, defaultPrinter) => {
-  const copies = body.copies === undefined ? undefined : Number(body.copies);
-  if (copies !== undefined && (!Number.isInteger(copies) || copies < 1 || copies > 99)) {
-    throw new Error("copies debe ser un entero entre 1 y 99.");
-  }
-
-  const printer = String(body.printer ?? defaultPrinter ?? "").trim();
-
-  return {
-    ...(printer ? { printer } : {}),
-    ...(copies ? { copies } : {}),
-    ...(body.paperSize ? { paperSize: String(body.paperSize) } : {}),
-    ...(body.orientation === "landscape" ? { orientation: "landscape" } : {}),
-    silent: true,
-  };
-};
-
-async function printPdf(body, maxPdfBytes, defaultPrinter) {
-  const pdf = parsePdfBase64(body.pdfBase64, maxPdfBytes);
-  const directory = await mkdtemp(join(tmpdir(), "dnx-print-"));
-  const filePath = join(directory, "documento.pdf");
-  try {
-    await writeFile(filePath, pdf);
-    await print(filePath, printableOptions(body, defaultPrinter));
-  } finally {
-    await rm(directory, { force: true, recursive: true });
-  }
-}
-
 const start = async () => {
   if (process.platform !== "win32") {
     throw new Error("DNX Print Agent solo funciona en Windows.");
@@ -136,7 +104,12 @@ const start = async () => {
 
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
     if (request.method === "GET" && url.pathname === "/health") {
-      sendJson(response, 200, { ok: true, service: "dnx-print-agent" }, origin);
+      sendJson(response, 200, {
+        ok: true,
+        service: "dnx-print-agent",
+        build: AGENT_BUILD,
+        diagnosticMode: config.diagnosticMode,
+      }, origin);
       return;
     }
 
@@ -169,11 +142,13 @@ const start = async () => {
           throw new Error("El cuerpo de impresión debe ser un objeto JSON.");
         }
         printQueue = printQueue.catch(() => undefined).then(async () => {
-          const defaultPrinter = await resolveDefaultPrinter();
-          await printPdf(body, config.maxPdfBytes, defaultPrinter);
+          const defaultPrinter = config.diagnosticMode || body.printer
+            ? config.defaultPrinter
+            : await resolveDefaultPrinter();
+          return processPrintJob(body, { ...config, defaultPrinter }, { print, origin });
         });
-        await printQueue;
-        sendJson(response, 202, { ok: true, message: "Impresión enviada." }, origin);
+        const result = await printQueue;
+        sendJson(response, result.diagnosticMode ? 409 : 202, result, origin);
         return;
       }
 
@@ -186,6 +161,15 @@ const start = async () => {
   });
 
   server.listen(config.port, "127.0.0.1", () => {
+    console.log(JSON.stringify({
+      event: "agent_started",
+      build: AGENT_BUILD,
+      diagnosticMode: config.diagnosticMode,
+      printScale: config.printScale || "(predeterminada)",
+      hostname: os.hostname(),
+      windowsUser: os.userInfo().username,
+      pid: process.pid,
+    }));
     console.log(`DNX Print Agent activo en http://127.0.0.1:${config.port}`);
   });
 };
