@@ -30,7 +30,7 @@ test("HTTP de diagnóstico guarda, informa que no imprimió y conserva autentica
       port, token, allowedOrigins: [origin], diagnosticMode: true, printScale: "fit",
     }));
     child = spawn(process.execPath, [join(directory, "src/server.mjs")], {
-      cwd: directory, windowsHide: true,
+      cwd: directory, windowsHide: true, env: { ...process.env, SystemDrive: directory },
     });
     child.stdout.on("data", (chunk) => { output += chunk; });
     child.stderr.on("data", (chunk) => { output += chunk; });
@@ -47,6 +47,7 @@ test("HTTP de diagnóstico guarda, informa que no imprimió y conserva autentica
       }
     }
     assert.equal(health?.build, AGENT_BUILD, output);
+    assert.equal(health?.fileSaving, true);
     assert.equal(health?.diagnosticMode, true);
     const unauthorized = await fetch(base + "/v1/print", {
       method: "POST", headers: { "Content-Type": "application/json", Origin: origin },
@@ -56,6 +57,19 @@ test("HTTP de diagnóstico guarda, informa que no imprimió y conserva autentica
     const headers = {
       "Content-Type": "application/json", Authorization: "Bearer " + token, Origin: origin,
     };
+    const saveBody = JSON.stringify({ fileName: "comprobante.pdf", fileBase64: pdf.toString("base64") });
+    const deniedSave = await fetch(base + "/v1/files", {
+      method: "POST", headers: { "Content-Type": "application/json", Origin: origin }, body: saveBody,
+    });
+    assert.equal(deniedSave.status, 401);
+    const forbiddenSave = await fetch(base + "/v1/files", {
+      method: "POST", headers: { ...headers, Origin: "http://desconocido" }, body: saveBody,
+    });
+    assert.equal(forbiddenSave.status, 403);
+    const saved = await fetch(base + "/v1/files", { method: "POST", headers, body: saveBody });
+    assert.equal(saved.status, 201);
+    const savedFile = await saved.json();
+    assert.deepEqual(await readFile(savedFile.path), pdf);
     const invalid = await fetch(base + "/v1/print", {
       method: "POST", headers, body: JSON.stringify({ pdfBase64: "bm8gcGRm" }),
     });

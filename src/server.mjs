@@ -5,6 +5,8 @@ import { promisify } from "node:util";
 import pdfToPrinter from "pdf-to-printer";
 import { loadConfig } from "./config.mjs";
 import { AGENT_BUILD, processPrintJob } from "./print-job.mjs";
+import { saveFile } from "./save-file.mjs";
+import path from "node:path";
 
 const { print } = pdfToPrinter;
 const execFileAsync = promisify(execFile);
@@ -108,6 +110,7 @@ const start = async () => {
         ok: true,
         service: "dnx-print-agent",
         build: AGENT_BUILD,
+        fileSaving: true,
         diagnosticMode: config.diagnosticMode,
       }, origin);
       return;
@@ -131,6 +134,13 @@ const start = async () => {
     }
 
     try {
+      if (request.method === "POST" && url.pathname === "/v1/files") {
+        const body = await readJson(request, maxRequestBytes);
+        const directory = path.join(`${process.env.SystemDrive || "C:"}\\`, "DNX", "Descargas");
+        const result = await saveFile(body, directory, config.maxPdfBytes);
+        sendJson(response, 201, result, origin);
+        return;
+      }
       if (request.method === "GET" && url.pathname === "/v1/printers") {
         sendJson(response, 200, { printers: await getWindowsPrinters() }, origin);
         return;

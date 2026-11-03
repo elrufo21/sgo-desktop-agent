@@ -63,6 +63,16 @@ Authorization: Bearer <token configurado>
 | GET | `/v1/system` | `hostname`, plataforma e impresora predeterminada. No requiere token; solo responde a un origen permitido y no permite imprimir. |
 | GET | `/v1/printers` | Impresoras instaladas en Windows. |
 | POST | `/v1/print` | Envía un PDF a la impresora. |
+| POST | `/v1/files` | Guarda un archivo autorizado en la carpeta local de DNX. |
+
+La web envía `fileName` y `fileBase64` a `/v1/files` con el mismo token y origen permitido. Guarda PDF, XML, ZIP, XLSX y TXT en `C:\DNX\Descargas` (en la unidad de Windows), sin sobrescribir archivos: agrega `(1)`, `(2)`, etc. El límite es `maxPdfBytes` (10 MB por defecto). La carpeta es compartida por los usuarios de la PC según sus permisos de Windows; el servicio debe poder crear y escribir en ella, y los usuarios necesitan acceso de lectura. El agente no abre el explorador. Mantener protegidos el token y los orígenes permitidos.
+
+Esta función requiere actualizar el servicio en cada PC antes de publicar la web que lo utiliza. Si el agente no está activo o no puede guardar, la web muestra el error. Las vistas previas y el botón de descarga del visor de Chrome siguen gestionados por el navegador.
+Tras actualizar el servicio, `GET /health` debe indicar `fileSaving: true`; no basta comprobar que responda, porque versiones anteriores también tienen la ruta de salud.
+
+### Botón Ver carpeta
+
+Ejecutar `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\instalar-ver-carpeta.ps1` desde la carpeta que también contiene `abrir-carpeta-descargas.vbs`, iniciando sesión como el usuario que usa DNX. No necesita administrador ni reiniciar el servicio; hay que ejecutarlo para cada usuario de Windows de la PC. Instala en `%LOCALAPPDATA%\DNX\VerCarpeta` y registra `dnxdescargas:` bajo `HKCU`. El botón abre únicamente la carpeta fija de DNX en la unidad de Windows, sin recibir rutas del navegador. Chrome puede pedir confirmación al abrir el protocolo. Para retirarlo, eliminar la clave `HKCU\Software\Classes\dnxdescargas` y la carpeta instalada de ese usuario.
 
 Ejemplo para imprimir:
 
